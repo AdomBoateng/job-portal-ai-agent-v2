@@ -1,0 +1,1 @@
+"""Compatibility package for legacy app.core imports."""
