@@ -1,3 +1,8 @@
 /.venv
 /ai-agent.log
 /tests
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
