@@ -11,8 +11,13 @@ logger = get_logger("migrations")
 # ---------------------------------------------------------------------------
 COLLECTIONS: dict[str, list[IndexModel]] = {
     "jobs": [
-        # job_id is the natural business key used for upserts and look-ups
-        IndexModel([("job_id", ASCENDING)], unique=True, name="job_id_unique"),
+        # Job snapshots are scoped by session_id; keep job_id searchable on its own.
+        IndexModel(
+            [("job_id", ASCENDING), ("session_id", ASCENDING)],
+            unique=True,
+            name="jobs_job_session_unique",
+        ),
+        IndexModel([("job_id", ASCENDING)], name="jobs_job_id_idx"),
         IndexModel([("session_id", ASCENDING)], name="jobs_session_id_idx"),
     ],
     "cvs": [
@@ -52,6 +57,15 @@ async def run_migrations(db: AsyncIOMotorDatabase) -> None:
             logger.info("Created collection: %s", collection_name)
         else:
             logger.debug("Collection already exists: %s", collection_name)
+
+        if collection_name == "jobs":
+            collection = db[collection_name]
+            existing_indexes = await collection.index_information()
+
+            legacy_index = existing_indexes.get("job_id_unique")
+            if legacy_index and legacy_index.get("unique"):
+                await collection.drop_index("job_id_unique")
+                logger.info("Dropped legacy unique index: job_id_unique")
 
         # create_indexes is idempotent for indexes with the same name/key.
         if indexes:

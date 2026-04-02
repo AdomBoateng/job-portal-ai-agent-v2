@@ -63,8 +63,11 @@ async def receive_cv(payload: CVPayload):
             logger.debug(
                 f"Attempting to add CV {payload.application_id} to job {payload.job_id}"
             )
+            job_filter = {"job_id": payload.job_id}
+            if payload.session_id is not None:
+                job_filter["session_id"] = payload.session_id
             result = await db["jobs"].update_one(
-                {"job_id": payload.job_id},
+                job_filter,
                 {"$addToSet": {"mapped_cvs": payload.application_id}},
             )
             if result.modified_count > 0:

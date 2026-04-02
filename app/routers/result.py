@@ -2,6 +2,7 @@ from fastapi import APIRouter, HTTPException
 from app.utils.db import get_db
 from fastapi.responses import FileResponse
 import pandas as pd
+from typing import Optional
 from app.helpers.logging_config import get_logger
 
 logger = get_logger("routers.result")
@@ -27,7 +28,15 @@ async def generate_report():
         cvs = await db["cvs"].find({}).to_list(length=1000)
         logger.debug(f"Fetched {len(jds)} jobs and {len(cvs)} CVs for lookup")
         
-        jd_map = {str(jd.get("job_id")): jd.get("title", "Unknown Role") for jd in jds}
+        jd_map = {}
+        for jd in jds:
+            job_id = str(jd.get("job_id"))
+            session_id = jd.get("session_id")
+            title = jd.get("title", "Unknown Role")
+            if session_id is not None:
+                jd_map[(job_id, str(session_id))] = title
+            if job_id not in jd_map:
+                jd_map[job_id] = title
         cv_map = {}
         for cv in sorted(
             cvs,
@@ -38,10 +47,15 @@ async def generate_report():
         data = []
         for r in reports:
             job_id = r.get("job_id")
+            session_id = r.get("session_id")
             application_id = r.get("application_id")
+            role_name = jd_map.get((str(job_id), str(session_id)))
+            if role_name is None:
+                role_name = jd_map.get(str(job_id), "Unknown")
             data.append({
                 "JD ID": str(job_id),
-                "Role": jd_map.get(str(job_id), "Unknown"),
+                "Session ID": str(session_id) if session_id is not None else "",
+                "Role": role_name,
                 "CV ID": str(application_id),
                 "Candidate": cv_map.get(str(application_id), "Unknown"),
                 "Score": r.get("score", 0),
@@ -67,27 +81,35 @@ async def generate_report():
 
 
 @router.get("/results/{job_id}")
-async def get_results_for_job(job_id: str):
+async def get_results_for_job(job_id: str, session_id: Optional[str] = None):
     """
     Get all screening results for a specific JD.
     Returns list of CVs with their scores.
     """
     try:
-        logger.info(f"Fetching results for job: {job_id}")
+        logger.info("Fetching results for job: %s session_id=%s", job_id, session_id)
         db = await get_db()
         if db is None:
             logger.error("Database unavailable when fetching results")
             raise HTTPException(status_code=500, detail="Database Unavailable")
         
         # Fetch Job
-        job = await db["jobs"].find_one({"job_id": job_id})
+        job_filter = {"job_id": job_id}
+        if session_id is not None:
+            job_filter["session_id"] = session_id
+
+        job = await db["jobs"].find_one(job_filter)
         if not job:
-            logger.warning(f"Job not found: {job_id}")
+            logger.warning("Job not found: %s session_id=%s", job_id, session_id)
             raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
         
         # Fetch all match reports for this Job
-        reports = await db["match_reports"].find({"job_id": job_id}).to_list(length=None)
-        logger.info(f"Found {len(reports)} results for job {job_id}")
+        report_filter = {"job_id": job_id}
+        if session_id is not None:
+            report_filter["session_id"] = session_id
+
+        reports = await db["match_reports"].find(report_filter).to_list(length=None)
+        logger.info("Found %d results for job %s session_id=%s", len(reports), job_id, session_id)
         
         results = []
         for report in reports:

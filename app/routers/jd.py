@@ -13,11 +13,8 @@ router = APIRouter()
 async def receive_jd(payload: JDPayload):
     """Receive a Job Description from middleware.
 
-    IMPORTANT: We upsert by (session_id, job_id) to prevent the "stale JD" bug
-    where multiple applications for the same job_id overwrite each other.
-
-    Legacy behavior (no session_id): we still upsert by job_id, but this is not
-    recommended. Prefer using /score.
+    Job snapshots are scoped by (session_id, job_id) when a session is present.
+    Legacy requests without session_id fall back to job_id-only upserts.
     """
     try:
         logger.info(f"Receiving JD: {payload.job_id} - {payload.title} (session_id={payload.session_id})")
@@ -26,7 +23,9 @@ async def receive_jd(payload: JDPayload):
             logger.error("Database unavailable when receiving JD")
             raise HTTPException(status_code=500, detail="Database Unavailable")
 
-        job_filter = {"job_id": payload.job_id, "session_id": payload.session_id}
+        job_filter = {"job_id": payload.job_id}
+        if payload.session_id is not None:
+            job_filter["session_id"] = payload.session_id
 
         jd_update = {
             "$set": {
